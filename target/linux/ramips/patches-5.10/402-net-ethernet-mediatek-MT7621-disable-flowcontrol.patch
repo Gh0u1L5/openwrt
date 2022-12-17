@@ -1,0 +1,91 @@
+--- a/drivers/net/dsa/mt7530.c
++++ b/drivers/net/dsa/mt7530.c
+@@ -2086,6 +2086,17 @@
+ 	val |= MHWTRAP_MANUAL;
+ 	mt7530_write(priv, MT7530_MHWTRAP, val);
+ 
++	/* MT7621 a bug prevents Flow Control to work reliably; so for now we disable it */
++	usleep_range(10, 20);
++
++	val = mt7530_read(priv, 0x1FE0);
++	val &= ~BIT(31);
++	mt7530_write(priv, 0x1FE0, val);
++
++	mt7530_write(priv, MT7530_PMCR_P(5), 0x5e30b);
++	mt7530_write(priv, MT7530_PMCR_P(6), 0x5e30b);
++	usleep_range(10, 20);
++
+ 	priv->p6_interface = PHY_INTERFACE_MODE_NA;
+ 
+ 	/* Enable and reset MIB counters */
+@@ -2732,10 +2743,6 @@
+ 	}
+ 	if (duplex == DUPLEX_FULL) {
+ 		mcr |= PMCR_FORCE_FDX;
+-		if (tx_pause)
+-			mcr |= PMCR_TX_FC_EN;
+-		if (rx_pause)
+-			mcr |= PMCR_RX_FC_EN;
+ 	}
+ 
+ 	if (mode == MLO_AN_PHY && phydev && phy_init_eee(phydev, 0) >= 0) {
+@@ -2843,9 +2850,6 @@
+ 
+ 	priv->info->mac_port_validate(ds, port, mask);
+ 
+-	phylink_set(mask, Pause);
+-	phylink_set(mask, Asym_Pause);
+-
+ 	linkmode_and(supported, supported, mask);
+ 	linkmode_and(state->advertising, state->advertising, mask);
+ 
+@@ -2887,10 +2891,6 @@
+ 	}
+ 
+ 	state->pause &= ~(MLO_PAUSE_RX | MLO_PAUSE_TX);
+-	if (pmsr & PMSR_RX_FC)
+-		state->pause |= MLO_PAUSE_RX;
+-	if (pmsr & PMSR_TX_FC)
+-		state->pause |= MLO_PAUSE_TX;
+ 
+ 	return 1;
+ }
+
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+@@ -402,11 +402,7 @@
+ 		break;
+ 	}
+ 
+-	state->pause &= (MLO_PAUSE_RX | MLO_PAUSE_TX);
+-	if (pmsr & MAC_MSR_RX_FC)
+-		state->pause |= MLO_PAUSE_RX;
+-	if (pmsr & MAC_MSR_TX_FC)
+-		state->pause |= MLO_PAUSE_TX;
++	state->pause &= ~(MLO_PAUSE_RX | MLO_PAUSE_TX);
+ }
+ 
+ static void mtk_mac_an_restart(struct phylink_config *config)
+@@ -456,12 +452,6 @@
+ 	if (duplex == DUPLEX_FULL)
+ 		mcr |= MAC_MCR_FORCE_DPX;
+ 
+-	/* Configure pause modes - phylink will avoid these for half duplex */
+-	if (tx_pause)
+-		mcr |= MAC_MCR_FORCE_TX_FC;
+-	if (rx_pause)
+-		mcr |= MAC_MCR_FORCE_RX_FC;
+-
+ 	mcr |= MAC_MCR_TX_EN | MAC_MCR_RX_EN;
+ 	mtk_w32(mac->hw, mcr, MTK_MAC_MCR(mac->id));
+ }
+@@ -540,9 +530,6 @@
+ 		}
+ 	}
+ 
+-	phylink_set(mask, Pause);
+-	phylink_set(mask, Asym_Pause);
+-
+ 	linkmode_and(supported, supported, mask);
+ 	linkmode_and(state->advertising, state->advertising, mask);
+ 
